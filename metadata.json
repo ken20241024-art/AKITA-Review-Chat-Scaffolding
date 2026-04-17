@@ -1,0 +1,8 @@
+{
+  "name": "AKITA Review Chat SCF",
+  "description": "An AI-powered English conversation practice app with a newly developed scaffolding function.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": []
+}
