@@ -146,46 +146,104 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
 - 文脈となる前提データ: [${docContent}]
 - ユーザーからの単文相槌のみの場合は状況に応じて会話を流します。`;
 
-      // ★修正箇所: WebSocket の接続先を確実に v1alpha にするため、live.connect の直下に config: { apiVersion: 'v1alpha' } を配置した正しい構造
-      // @ts-ignore
-      const sessionPromise = ai.live.connect({
-        model: 'gemini-2.0-flash',
-        config: {
-          apiVersion: 'v1alpha'
+      // ★自前でWebSocket接続を確立するコード（ラッパー）に置換
+      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.LiveService.BidiGenerateContent?key=${apiKey}`;
+      const ws = new WebSocket(wsUrl);
+
+      const sessionObj = {
+        sendRealtimeInput: (input: any) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            if (input.media) {
+              const msg = {
+                realtimeInput: {
+                  mediaChunks: [
+                    {
+                      mimeType: input.media.mimeType,
+                      data: input.media.data
+                    }
+                  ]
+                }
+              };
+              ws.send(JSON.stringify(msg));
+            } else if (input.text) {
+              const msg = {
+                clientContent: {
+                  turns: [
+                    {
+                      role: 'user',
+                      parts: [{ text: input.text }]
+                    }
+                  ],
+                  turnComplete: true
+                }
+              };
+              ws.send(JSON.stringify(msg));
+            }
+          }
         },
-        responseModalities: ['AUDIO'],
-        speechConfig: { 
-          voiceConfig: { 
-            prebuiltVoiceConfig: { voiceName: 'Kore' } 
-          } 
-        },
-        systemInstruction: {
-          parts: [{ text: SYSTEM_INSTRUCTION }]
-        },
-        callbacks: {
-          onopen: () => {
-            if (sessionClosedRef.current) return;
-            setStatus('Active');
-            retryCountRef.current = 0; 
-            setupMic(inputCtx, sessionPromise);
-            
-            if (countdown === null && !sessionActive) {
-              setCountdown(3);
+        close: () => {
+          ws.close();
+        }
+      };
+
+      const sessionPromise = new Promise<any>((resolve, reject) => {
+        ws.onopen = () => {
+          if (sessionClosedRef.current) {
+            ws.close();
+            return;
+          }
+          
+          // 最初の接続セットアップメッセージを送信
+          const setupMsg = {
+            setup: {
+              model: 'models/gemini-2.0-flash',
+              generationConfig: {
+                responseModalities: ['AUDIO'],
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: { voiceName: 'Kore' }
+                  }
+                }
+              },
+              systemInstruction: {
+                parts: [{ text: SYSTEM_INSTRUCTION }]
+              }
+            }
+          };
+          ws.send(JSON.stringify(setupMsg));
+          
+          setStatus('Active');
+          retryCountRef.current = 0;
+          setupMic(inputCtx, sessionPromise);
+          
+          if (countdown === null && !sessionActive) {
+            setCountdown(3);
+          }
+          
+          try {
+            if (transcriptRef.current.length === 0) {
+              sessionObj.sendRealtimeInput({ text: "AI here. Ready to discuss. What are your thoughts?" });
+            } else {
+              sessionObj.sendRealtimeInput({ text: "I am back. Let us continue the session." });
+            }
+          } catch(e) {}
+
+          resolve(sessionObj);
+        };
+
+        ws.onmessage = async (event) => {
+          if (sessionClosedRef.current) return;
+          try {
+            let text = "";
+            if (typeof event.data === 'string') {
+              text = event.data;
+            } else if (event.data instanceof Blob) {
+              text = await event.data.text();
+            } else if (event.data instanceof ArrayBuffer) {
+              text = new TextDecoder().decode(event.data);
             }
             
-            sessionPromise.then(s => {
-              if (sessionClosedRef.current || !s) return;
-              try {
-                if (transcriptRef.current.length === 0) {
-                  s.sendRealtimeInput({ text: "AI here. Ready to discuss. What are your thoughts?" });
-                } else {
-                  s.sendRealtimeInput({ text: "I am back. Let us continue the session." });
-                }
-              } catch(e) {}
-            });
-          },
-          onmessage: async (msg: LiveServerMessage) => {
-            if (sessionClosedRef.current) return;
+            const msg = JSON.parse(text);
 
             if (msg.serverContent?.modelTurn?.parts) {
               for (const part of msg.serverContent.modelTurn.parts) {
@@ -219,16 +277,21 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                  currentStudentTurnBuffer.current = "";
                }
             }
-          },
-          onerror: (e) => {
-            console.error("Session Error:", e);
-            handleConnectionLoss();
-          },
-          onclose: (e) => {
-            console.warn("Session Closed:", e);
-            handleConnectionLoss();
-          },
-        }
+          } catch (e) {
+            console.error("Error parsing message", e);
+          }
+        };
+
+        ws.onerror = (e) => {
+          console.error("Session Error:", e);
+          handleConnectionLoss();
+          reject(e);
+        };
+
+        ws.onclose = (e) => {
+          console.warn("Session Closed:", e);
+          handleConnectionLoss();
+        };
       });
 
       sessionRef.current = await sessionPromise;
