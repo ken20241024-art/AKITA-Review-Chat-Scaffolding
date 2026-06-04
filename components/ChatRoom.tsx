@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { AppMode, PracticeLevel, TeacherTask, SessionResult } from '../types';
@@ -118,7 +117,14 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       if (!apiKey) {
         throw new Error("Gemini API Key is missing. Please check your environment settings (VITE_GEMINI_API_KEY).");
       }
-      const ai = new GoogleGenAI({ apiKey });
+      
+      const ai = new GoogleGenAI({ 
+        apiKey,
+        apiVersion: 'v1alpha',
+        httpOptions: {
+          apiVersion: 'v1alpha'
+        }
+      });
       
       if (!audioContextsRef.current) {
         const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -134,22 +140,34 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
       const docContent = mode === AppMode.TEACHER_TASK ? teacherTask?.pdfContent : selfStudyText;
 
       const SYSTEM_INSTRUCTION = `
-あなたは英会話インストラクターです。
-以下の【3段階の意味交渉ルール】を厳格に守って会話を進めてください。
+あなたの役割は、CEFR A1レベル（超初級）の平易な英語を使用する、極めてフレンドリーな英会話インストラクターです。
+以下の【3段階の意味交渉ルール】を厳格に順守して対話を行ってください。
 
 ■ 3段階の意味交渉ルール
-1. 【聞き返し】ユーザーが発言したら、まずは完全に理解したフリをせず、"What do you mean by ~?" や "Could you explain that more specifically?" と聞き返し、ユーザーに説明を促してください。
-2. 【深掘り】ユーザーが説明を加えたら、さらに別の角度から質問を重ねるか、あなたの解釈が合っているか確認（"So, are you saying...?"）して、もう一段階深く話させてください。
-3. 【展開】ユーザーが2回以上詳細に説明し、十分に「交渉」が行われたと判断した場合のみ、次の質問や新しい話題に移ってください。
+1. 【聞き返し】ユーザー発言の後は安易に理解を示さず、"What do you mean by ~?" や "Could you explain that more specifically?" と問い直し、さらなる表現を促します。
+2. 【深掘り】追加の説明を受けたら、"So, are you saying...?" のように別の角度から確認し、より深く詳細なやり取りに誘導します。
+3. 【展開】交渉が2往復以上行われ、十分に「交渉」と「理解」が成立して初めて、次のトピックに移ることができます。
 
-■ 制約
-- 常に CEFR A1 レベル（超初級）の平易な英語を使用してください。
-- ユーザーが "Oh" や "I see" などの相槌だけの時は、このルールを適用せず自然に流してください。
-- トピック（PDF内容）がある場合は、その内容から逸れないようにしてください。
-- 会話の文脈（前提知識）: [${docContent}]`;
+■ スピーチマナー・制約
+- 文脈となる前提データ: [${docContent}]
+- ユーザーからの単文相槌のみの場合は状況に応じて会話を流します。`;
 
+      // ★修正箇所: WebSocket の接続先を確実に v1alpha にするため、live.connect の直下に config: { apiVersion: 'v1alpha' } を配置した正しい構造
+      // @ts-ignore
       const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+        model: 'gemini-2.0-flash',
+        config: {
+          apiVersion: 'v1alpha'
+        },
+        responseModalities: ['AUDIO'],
+        speechConfig: { 
+          voiceConfig: { 
+            prebuiltVoiceConfig: { voiceName: 'Kore' } 
+          } 
+        },
+        systemInstruction: {
+          parts: [{ text: SYSTEM_INSTRUCTION }]
+        },
         callbacks: {
           onopen: () => {
             if (sessionClosedRef.current) return;
@@ -175,13 +193,19 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
           onmessage: async (msg: LiveServerMessage) => {
             if (sessionClosedRef.current) return;
 
-            if (msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data) {
-              playAudio(msg.serverContent.modelTurn.parts[0].inlineData.data, outputCtx);
+            if (msg.serverContent?.modelTurn?.parts) {
+              for (const part of msg.serverContent.modelTurn.parts) {
+                if (part.inlineData?.data) {
+                  playAudio(part.inlineData.data, outputCtx);
+                }
+              }
             }
+            
             if (msg.serverContent?.outputTranscription) {
                currentAiTurnBuffer.current += msg.serverContent.outputTranscription.text;
                setCurrentAiText(currentAiTurnBuffer.current);
             }
+            
             if (msg.serverContent?.inputTranscription) {
                currentStudentTurnBuffer.current += msg.serverContent.inputTranscription.text;
                if (currentAiTurnBuffer.current) {
@@ -192,6 +216,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
                  setCurrentAiText("");
                }
             }
+            
             if (msg.serverContent?.turnComplete) {
                if (currentStudentTurnBuffer.current) {
                  const line = `STU: ${currentStudentTurnBuffer.current.trim()}`;
@@ -209,15 +234,9 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
             console.warn("Session Closed:", e);
             handleConnectionLoss();
           },
-        },
-        config: {
-          responseModalities: [Modality.AUDIO],
-          systemInstruction: SYSTEM_INSTRUCTION,
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {}
         }
       });
+
       sessionRef.current = await sessionPromise;
     } catch (err) {
       console.error(err);
@@ -369,9 +388,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         audioBase64: audioBase64 
       };
       
-      // Attempt auto-sync once
       await sendSessionToIntegration(result);
-      
       onComplete(result);
     } catch (err) {
       console.error(err);
@@ -430,7 +447,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         </div>
         <div className="col-span-4 deco-panel p-8 bg-[#A67C52] text-[#D4AF37] border-none flex items-center justify-center corner-stepped">
           <div className="text-center">
-            <span className="font-bold uppercase tracking-[0.3em] text-[9px] text-white opacity-80">Time</span>
+            <span className="font-bold uppercase tracking-[0.3em] text-[10px] text-white opacity-80">Time</span>
             <div className="text-4xl font-bold title-serif tracking-tighter text-white">{Math.floor(timeLeft/60)}:{timeLeft%60<10?'0':''}{timeLeft%60}</div>
           </div>
         </div>
