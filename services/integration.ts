@@ -12,7 +12,7 @@ import { SessionResult, TeacherTask } from "../types";
  * 新しく発行されたURLを使う必要があります。
  * ==========================================================
  */
-const GLOBAL_GAS_URL = "https://script.google.com/macros/s/AKfycbwWQuO-1OxyaGTCSJREtcPm56PTfGpkjXwYFVEq28yYlyOjgrDab-VcQf26kfqWqOTKDg/exec"; 
+const GLOBAL_GAS_URL = "https://script.google.com/macros/s/AKfycbz8iq0x0R0AXozY9Jel4j3iVkjgeCGTFeb71sYX_RJyJV_L4vKpU52x4mCQsJlxwZRMrg/exec"; 
 
 /**
  * Retrieves the configured GAS Web App URL.
