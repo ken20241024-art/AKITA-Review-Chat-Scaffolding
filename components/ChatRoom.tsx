@@ -118,13 +118,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({
         throw new Error("Gemini API Key is missing. Please check your environment settings (VITE_GEMINI_API_KEY).");
       }
       
-      const ai = new GoogleGenAI({ 
-        apiKey,
-        apiVersion: 'v1alpha',
-        httpOptions: {
-          apiVersion: 'v1alpha'
-        }
-      });
+      const ai = new GoogleGenAI({ apiKey });
       
       if (!audioContextsRef.current) {
         const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
