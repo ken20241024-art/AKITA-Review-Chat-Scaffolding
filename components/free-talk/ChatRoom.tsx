@@ -43,7 +43,7 @@ export const ChatRoom: React.FC<ChatRoomProps> = ({ level, onComplete, onCancel 
       Adapt your vocabulary to ${level} level.`;
 
       const session = await ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+        model: 'gemini-2.0-flash',
         config: {
           systemInstruction,
           responseModalities: [Modality.AUDIO],

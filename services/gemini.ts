@@ -2,6 +2,21 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisReport, PracticeLevel } from "../types";
 
+export function calculateStudentWordCount(transcript: string): number {
+  const lines = transcript.split('\n');
+  let count = 0;
+  for (const line of lines) {
+    if (line.trim().startsWith('STU:')) {
+      const content = line.replace(/^\s*STU:\s*/i, '').trim();
+      if (content) {
+        const words = content.split(/\s+/).filter(w => w.length > 0);
+        count += words.length;
+      }
+    }
+  }
+  return count;
+}
+
 export async function analyzeSession(transcript: string, targetLevel: PracticeLevel): Promise<AnalysisReport> {
   try {
     const levelMap = {
@@ -54,13 +69,15 @@ export async function analyzeSession(transcript: string, targetLevel: PracticeLe
       }
     });
 
-    return JSON.parse(response.text?.trim() || "{}");
+    const result = JSON.parse(response.text?.trim() || "{}") as AnalysisReport;
+    result.wordCount = calculateStudentWordCount(transcript);
+    return result;
   } catch (error) {
     console.error("Analysis failed", error);
     return {
       cefr: "N/A",
       pronunciationScore: 0,
-      wordCount: transcript.split(' ').length / 2,
+      wordCount: calculateStudentWordCount(transcript),
       vocabComplexity: "N/A",
       mistakes: ["No major errors detected in automated analysis."],
       advice: "Try to use more diverse vocabulary and longer sentence structures."

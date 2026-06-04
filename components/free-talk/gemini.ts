@@ -2,6 +2,21 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisReport, PracticeLevel } from "./types";
 
+export function calculateStudentWordCount(transcript: string): number {
+  const lines = transcript.split('\n');
+  let count = 0;
+  for (const line of lines) {
+    if (line.trim().startsWith('STU:')) {
+      const content = line.replace(/^\s*STU:\s*/i, '').trim();
+      if (content) {
+        const words = content.split(/\s+/).filter(w => w.length > 0);
+        count += words.length;
+      }
+    }
+  }
+  return count;
+}
+
 export async function analyzeSession(transcript: string, targetLevel: PracticeLevel): Promise<AnalysisReport> {
   try {
     const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
@@ -42,13 +57,15 @@ export async function analyzeSession(transcript: string, targetLevel: PracticeLe
       }
     });
 
-    return JSON.parse(response.text?.trim() || "{}");
+    const result = JSON.parse(response.text?.trim() || "{}") as AnalysisReport;
+    result.wordCount = calculateStudentWordCount(transcript);
+    return result;
   } catch (error) {
     console.error(error);
     return {
       cefr: "N/A",
       pronunciationScore: 0,
-      wordCount: 0,
+      wordCount: calculateStudentWordCount(transcript),
       vocabComplexity: "N/A",
       mistakes: ["Analysis failed"],
       advice: "Keep practicing!"
